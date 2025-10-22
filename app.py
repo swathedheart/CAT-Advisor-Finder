@@ -327,9 +327,8 @@ def load_all_data(files: List[str]) -> Tuple[pd.DataFrame, list, Dict[str, int]]
     # Convert dates
     fix_date_columns_inplace(df, DATE_COLUMNS)
 
-    # <--- ***** CHANGED: Convert AUM to a number ***** --->
+    # Convert AUM to a number
     df[NB_AUM_CANON] = pd.to_numeric(df[NB_AUM_CANON], errors='coerce')
-    # <--- ***** END OF CHANGE ***** --->
 
     # Ensure all output columns exist one last time
     for col in OUTPUT_COLUMNS:
@@ -459,15 +458,16 @@ if run:
             else:
                 st.success(f"Found {len(result)} matching row(s).")
                 
-                # <--- ***** CHANGED: Added column_config for formatting ***** --->
+                # <--- ***** CHANGED: Use CurrencyColumn with precision=0 ***** --->
                 st.dataframe(
                     result, 
                     use_container_width=True, 
                     hide_index=True,
                     column_config={
-                        NB_AUM_CANON: st.column_config.NumberColumn(
+                        NB_AUM_CANON: st.column_config.CurrencyColumn(
                             label="NB AUM 6'25",
-                            format="$%,.0f"  # Format as $1,234,567
+                            currency="USD",   # Adds $ and commas
+                            precision=0       # Hides the .00 cents
                         )
                     }
                 )
