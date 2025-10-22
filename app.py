@@ -5,6 +5,7 @@ import os
 import re
 from datetime import datetime
 from typing import List, Tuple, Dict
+import csv # Import csv module for quoting constant
 
 # --- Header / Branding ---
 st.set_page_config(page_title="CAT Advisor Finder", page_icon="🐱", layout="wide")
@@ -302,7 +303,7 @@ def search_across_files(
     - combined results DataFrame
     - list of files that failed
     - column_nonempty_counts: non-empty counts per canonical output column (profiling)
-    - alias_hit_counts: counts of how often each alias/rule mapped to a canonical name
+    - alias_hit_counts: counts of how often each alias/rule mapped to a- canonical name
     """
     matches = []
     failed = []
@@ -313,13 +314,14 @@ def search_across_files(
         read_ok = False
         last_exception = None
         try:
-            # <-- CHANGED: Set sep='\t' (TAB) and engine='python'
+            # <-- CHANGED: Set sep='\t' (TAB), engine='python', and quoting=3
             for chunk in pd.read_csv(
                 f,
                 dtype="string",
                 chunksize=chunk_size,
-                engine='python',  # Python engine is more flexible
-                sep='\t',         # Explicitly set separator to TAB
+                engine='python',    # Python engine is more flexible
+                sep='\t',           # Explicitly set separator to TAB
+                quoting=csv.QUOTE_NONE, # <-- ADDED: Ignore all quote chars
                 encoding="utf-8",
                 low_memory=True,
                 on_bad_lines='skip',
@@ -345,13 +347,14 @@ def search_across_files(
             # Try other encodings if utf-8 fails
             for enc in ["utf-8-sig", "latin-1"]:
                 try:
-                    # <-- CHANGED: Set sep='\t' (TAB) and engine='python'
+                    # <-- CHANGED: Set sep='\t' (TAB), engine='python', and quoting=3
                     for chunk in pd.read_csv(
                         f,
                         dtype="string",
                         chunksize=chunk_size,
-                        engine='python',  # Python engine
-                        sep='\t',         # Explicitly set separator to TAB
+                        engine='python',    # Python engine
+                        sep='\t',           # Explicitly set separator to TAB
+                        quoting=csv.QUOTE_NONE, # <-- ADDED: Ignore all quote chars
                         encoding=enc,
                         low_memory=True,
                         on_bad_lines='skip',
