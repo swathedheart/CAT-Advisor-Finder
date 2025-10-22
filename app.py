@@ -51,7 +51,12 @@ HEADER_ALIASES: Dict[str, str] = {
     # Required
     "entity id": "Entity ID",
     "br team name": "BR Team Name",
+    "team name": "BR Team Name",
+    "broker team name": "BR Team Name",
+    "br team": "BR Team Name",
     "office city": "Office City",
+    "city": "Office City",
+
     # Common outputs
     "sf territory": "SF Territory",
     "dst firm name": "DST Firm Name",
@@ -153,13 +158,16 @@ def apply_header_normalization(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict[str
 # Other helpers
 # ---------------------------------------------
 
+# <--- ***** THIS IS THE FIX ***** --->
 def standardize_team_name(s: str) -> str:
-    """Lowercase, remove punctuation, collapse spaces—for partial team-name matching."""
+    """Lowercase, replace punctuation with space, collapse spaces—for partial team-name matching."""
     if not isinstance(s, str):
         return ""
     s = s.lower()
-    s = re.sub(r"[^\w\s]", "", s)
+    # CHANGED: Replaced punctuation with a space, instead of just removing it.
+    s = re.sub(r"[^\w\s]", " ", s) 
     return " ".join(s.split())
+# <--- ***** END OF FIX ***** --->
 
 def coalesce_column(df: pd.DataFrame, target: str, variants: list) -> pd.DataFrame:
     """Create/overwrite df[target] by pulling from the first non-empty among variant columns."""
@@ -314,14 +322,14 @@ def search_across_files(
         read_ok = False
         last_exception = None
         try:
-            # <-- CHANGED: Set sep='\t' (TAB), engine='python', and quoting=3
+            # <-- Set sep='\t' (TAB), engine='python', and quoting=3
             for chunk in pd.read_csv(
                 f,
                 dtype="string",
                 chunksize=chunk_size,
                 engine='python',    # Python engine is more flexible
                 sep='\t',           # Explicitly set separator to TAB
-                quoting=csv.QUOTE_NONE, # <-- ADDED: Ignore all quote chars
+                quoting=csv.QUOTE_NONE, # Ignore all quote chars
                 encoding="utf-8",
                 low_memory=True,
                 on_bad_lines='skip',
@@ -347,14 +355,14 @@ def search_across_files(
             # Try other encodings if utf-8 fails
             for enc in ["utf-8-sig", "latin-1"]:
                 try:
-                    # <-- CHANGED: Set sep='\t' (TAB), engine='python', and quoting=3
+                    # <-- Set sep='\t' (TAB), engine='python', and quoting=3
                     for chunk in pd.read_csv(
                         f,
                         dtype="string",
                         chunksize=chunk_size,
                         engine='python',    # Python engine
                         sep='\t',           # Explicitly set separator to TAB
-                        quoting=csv.QUOTE_NONE, # <-- ADDED: Ignore all quote chars
+                        quoting=csv.QUOTE_NONE, # Ignore all quote chars
                         encoding=enc,
                         low_memory=True,
                         on_bad_lines='skip',
@@ -380,7 +388,7 @@ def search_across_files(
                     continue # Try next encoding
 
         except Exception as e:
-            # Catch other read errors (e.g., file empty, permissions)
+            # Catch other read errors (e.Read each CSV in chunks using the Python engine (to auto-sniff separators),
             last_exception = e
             if f"{os.path.basename(f)} — {e}" not in failed:
                 failed.append(f"{os.path.basename(f)} — {e}")
@@ -441,7 +449,7 @@ if run:
     else:
         with st.spinner("Searching across files…"):
             result, failed, col_counts, alias_hits = search_across_files(
-                files, mode, key_input, city_input, chunk_size=150_000
+                files, mode, key_input, city_text, chunk_size=150_000
             )
 
         if failed:
@@ -460,6 +468,7 @@ if run:
         if result.empty:
             st.info("No matching rows found. Try adjusting the name/ID or city.")
         else:
+    
             st.success(f"Found {len(result)} matching row(s).")
             st.dataframe(result, use_container_width=True, hide_index=True)
             
