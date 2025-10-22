@@ -226,7 +226,7 @@ def fix_date_columns_inplace(df: pd.DataFrame, date_cols: List[str]) -> None:
 def list_files(glob_pattern: str) -> List[str]:
     return glob.glob(glob_pattern)
 
-# <--- ***** NEW CACHED FUNCTION TO LOAD ALL DATA ***** --->
+# <--- ***** CACHED FUNCTION TO LOAD ALL DATA ***** --->
 @st.cache_data(ttl=600, show_spinner="Loading and cleaning all Rolodex files for the first time...")
 def load_all_data(files: List[str]) -> Tuple[pd.DataFrame, list, Dict[str, int]]:
     """
@@ -327,19 +327,21 @@ def load_all_data(files: List[str]) -> Tuple[pd.DataFrame, list, Dict[str, int]]
     # Convert dates
     fix_date_columns_inplace(df, DATE_COLUMNS)
 
+    # <--- ***** CHANGED: Convert AUM to a number ***** --->
+    df[NB_AUM_CANON] = pd.to_numeric(df[NB_AUM_CANON], errors='coerce')
+    # <--- ***** END OF CHANGE ***** --->
+
     # Ensure all output columns exist one last time
     for col in OUTPUT_COLUMNS:
         if col not in df.columns:
             df[col] = ""
 
     return df, failed, alias_hit_counts
-# <--- ***** END OF NEW FUNCTION ***** --->
 
 
 # ---------------------------------------------
 # Core filtering
 # ---------------------------------------------
-# <--- ***** SIMPLIFIED: This function now *only* filters the big DataFrame ***** --->
 def filter_results(
     df: pd.DataFrame, 
     mode: str, 
@@ -378,7 +380,6 @@ def filter_results(
 
     # Return only the specified output columns
     return result[OUTPUT_COLUMNS], column_nonempty_counts
-# <--- ***** END OF SIMPLIFIED FUNCTION ***** --->
 
 
 # ---------------------------------------------
@@ -411,7 +412,6 @@ with st.sidebar:
 # ---------------------------------------------
 # Main flow
 # ---------------------------------------------
-# <--- ***** CHANGED: THIS IS THE NEW CACHING LOGIC ***** --->
 files = list_files(glob_pattern)
 st.write(f"Found files: {len(files)}")
 
@@ -427,7 +427,6 @@ if run:
         st.warning("No data files found. Check your folder pattern.")
     else:
         # 1. This will be SLOW the FIRST time, and fast every time after.
-        # It runs the slow parser and all the cleaning/coalescing.
         master_df, failed, alias_hits = load_all_data(files)
         
         if failed:
@@ -459,7 +458,20 @@ if run:
                 st.info("No matching rows found. Try adjusting the name/ID or city.")
             else:
                 st.success(f"Found {len(result)} matching row(s).")
-                st.dataframe(result, use_container_width=True, hide_index=True)
+                
+                # <--- ***** CHANGED: Added column_config for formatting ***** --->
+                st.dataframe(
+                    result, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        NB_AUM_CANON: st.column_config.NumberColumn(
+                            label="NB AUM 6'25",
+                            format="$%,.0f"  # Format as $1,234,567
+                        )
+                    }
+                )
+                # <--- ***** END OF CHANGE ***** --->
                 
                 csv_bytes = result.to_csv(index=False).encode("utf-8")
                 fname = f"advisor_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -469,4 +481,3 @@ if run:
                     file_name=fname,
                     mime="text/csv"
                 )
-# <--- ***** END OF NEW LOGIC ***** --->
