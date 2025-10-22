@@ -225,7 +225,7 @@ def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -
         if req not in df.columns:
             df[req] = ""
 
-    # --- CHANGED: City filter is now optional ---
+    # --- City filter is now optional ---
     df["_city"] = df["Office City"].astype(str).str.strip().str.lower()
     city_norm = (city_text or "").strip().lower()
 
@@ -237,7 +237,7 @@ def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -
         df["_team_norm"] = df["BR Team Name"].astype(str).apply(standardize_team_name)
         df["_match"] = df["_team_norm"].str.contains(standardize_team_name(key_text), na=False)
 
-    # --- CHANGED: Create city_mask, which is True if city_norm is blank ---
+    # --- Create city_mask, which is True if city_norm is blank ---
     if city_norm:
         city_mask = (df["_city"] == city_norm)
     else:
@@ -295,7 +295,7 @@ def search_across_files(
     chunk_size: int = 150_000,
 ) -> Tuple[pd.DataFrame, list, Dict[str, int], Dict[str, int]]:
     """
-    Read each CSV in chunks using C/Python engine (pyarrow doesn't support chunksize),
+    Read each CSV in chunks using the Python engine (to auto-sniff separators),
     normalize headers per chunk, filter in-chunk, and accumulate only the matches.
 
     Returns:
@@ -309,20 +309,52 @@ def search_across_files(
     column_nonempty_counts: Dict[str, int] = {c: 0 for c in OUTPUT_COLUMNS}
     alias_hit_counts: Dict[str, int] = {}
     
-    engines_that_support_chunks = ["c", "python"]
-
+    # <-- CHANGED: Removed the 'c' engine. We must use 'python' for sep=None.
+    
     for f in files:
         read_ok = False
+        last_exception = None
         try:
-            for eng in engines_that_support_chunks:
+            # <-- CHANGED: Set sep=None and engine='python'
+            for chunk in pd.read_csv(
+                f,
+                dtype="string",
+                chunksize=chunk_size,
+                engine='python',  # Must use python engine for auto-sniffing
+                sep=None,         # Auto-detect separator (commas or tabs)
+                encoding="utf-8",
+                low_memory=True,
+                on_bad_lines='skip',
+            ):
+                renamed_chunk, rename_map = apply_header_normalization(chunk)
+                
+                for orig, canon in (rename_map or {}).items():
+                    key = f"{orig} -> {canon}"
+                    alias_hit_counts[key] = alias_hit_counts.get(key, 0) + 1
+                
+                filtered = filter_results(renamed_chunk, mode, key_text, city_text)
+                
+                if not filtered.empty:
+                    for col in OUTPUT_COLUMNS:
+                        if col in filtered.columns:
+                            non_empty = filtered[col].notna().sum() - (filtered[col] == "").sum()
+                            column_nonempty_counts[col] += int(non_empty)
+                    matches.append(filtered)
+            read_ok = True # Success with utf-8
+
+        except UnicodeDecodeError as e:
+            last_exception = e
+            # Try other encodings if utf-8 fails
+            for enc in ["utf-8-sig", "latin-1"]:
                 try:
-                    # <-- CHANGED: Added on_bad_lines='skip'
+                    # <-- CHANGED: Set sep=None and engine='python'
                     for chunk in pd.read_csv(
                         f,
                         dtype="string",
                         chunksize=chunk_size,
-                        engine=eng,
-                        encoding="utf-8",
+                        engine='python',  # Must use python engine
+                        sep=None,         # Auto-detect separator
+                        encoding=enc,
                         low_memory=True,
                         on_bad_lines='skip',
                     ):
@@ -341,50 +373,21 @@ def search_across_files(
                                     column_nonempty_counts[col] += int(non_empty)
                             matches.append(filtered)
                     read_ok = True
-                    break # Success with this engine
-                
-                except UnicodeDecodeError:
-                    # Try other encodings
-                    for enc in ["utf-8-sig", "latin-1"]:
-                        try:
-                            # <-- CHANGED: Added on_bad_lines='skip'
-                            for chunk in pd.read_csv(
-                                f,
-                                dtype="string",
-                                chunksize=chunk_size,
-                                engine=eng,
-                                encoding=enc,
-                                low_memory=True,
-                                on_bad_lines='skip',
-                            ):
-                                renamed_chunk, rename_map = apply_header_normalization(chunk)
-                                
-                                for orig, canon in (rename_map or {}).items():
-                                    key = f"{orig} -> {canon}"
-                                    alias_hit_counts[key] = alias_hit_counts.get(key, 0) + 1
-                                
-                                filtered = filter_results(renamed_chunk, mode, key_text, city_text)
-                                
-                                if not filtered.empty:
-                                    for col in OUTPUT_COLUMNS:
-                                        if col in filtered.columns:
-                                            non_empty = filtered[col].notna().sum() - (filtered[col] == "").sum()
-                                            column_nonempty_counts[col] += int(non_empty)
-                                    matches.append(filtered)
-                            read_ok = True
-                            break # Success with this encoding
-                        except Exception:
-                            continue # Try next encoding
-                    if read_ok:
-                        break # Success with this engine
-                except Exception:
-                    continue # Try next engine
-
-            if not read_ok:
-                failed.append(f"{os.path.basename(f)} — could not read with C/Python engines")
+                    break # Success with this encoding
+                except Exception as e:
+                    last_exception = e
+                    continue # Try next encoding
 
         except Exception as e:
+            # Catch other read errors (e.g., file empty, permissions)
+            last_exception = e
             failed.append(f"{os.path.basename(f)} — {e}")
+
+        if not read_ok:
+             err_msg = f"{os.path.basename(f)} — could not read with Python engine. Last error: {last_exception}"
+             if err_msg not in failed:
+                failed.append(err_msg)
+
 
     out = pd.concat(matches, ignore_index=True) if matches else pd.DataFrame(columns=OUTPUT_COLUMNS)
     return out, failed, column_nonempty_counts, alias_hit_counts
@@ -428,7 +431,7 @@ if not files:
 st.divider()
 
 if run:
-    # <-- CHANGED: Only require key_input, city_input is optional
+    # <-- Only require key_input, city_input is optional
     if not key_input:
         st.warning("Enter an **Entity ID/Team Name** to search.")
     elif not files:
