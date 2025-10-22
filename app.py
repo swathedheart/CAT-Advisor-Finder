@@ -6,21 +6,20 @@ import re
 from datetime import datetime
 from typing import List, Tuple, Dict
 
---- Header / Branding ---
+# --- Header / Branding ---
 st.set_page_config(page_title="CAT Advisor Finder", page_icon="🐱", layout="wide")
 st.title("🐱 CAT Advisor Finder")
-# <-- CHANGED: Updated caption to reflect optional city
 st.caption("Search your Rolodex CSVs by Entity ID or BR Team Name. Office City is an optional filter.")
 
---- Columns to output (in your requested order) ---
+# --- Columns to output (in your requested order) ---
 OUTPUT_COLUMNS = [
     "BR Team Name", "DST Firm Name", "Data Driven Segment", "SF Territory", "Office State", "Office City", "Office Address", "SFDC Email", "DST Phone", "SFDC Phone", "Team Rank", "NB AUM 6'25", "2024 CRM Contacts", "2025 CRM Contacts", "Last Interaction Date", "Last BT Interaction Date", "SFDC Notes",
 ]
 
---- Required filter columns ---
+# --- Required filter columns ---
 REQUIRED_FILTER_COLS = ["Entity ID", "BR Team Name", "Office City"]
 
---- Date columns to fix (Excel serials -> real dates) ---
+# --- Date columns to fix (Excel serials -> real dates) ---
 DATE_COLUMNS = ["Last BT Interaction Date", "Last Interaction Date"]
 
 # Canonical names we'll reference
