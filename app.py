@@ -308,20 +308,18 @@ def search_across_files(
     failed = []
     column_nonempty_counts: Dict[str, int] = {c: 0 for c in OUTPUT_COLUMNS}
     alias_hit_counts: Dict[str, int] = {}
-    
-    # <-- CHANGED: Removed the 'c' engine. We must use 'python' for sep=None.
-    
+        
     for f in files:
         read_ok = False
         last_exception = None
         try:
-            # <-- CHANGED: Set sep=None and engine='python'
+            # <-- CHANGED: Set sep='\t' (TAB) and engine='python'
             for chunk in pd.read_csv(
                 f,
                 dtype="string",
                 chunksize=chunk_size,
-                engine='python',  # Must use python engine for auto-sniffing
-                sep=None,         # Auto-detect separator (commas or tabs)
+                engine='python',  # Python engine is more flexible
+                sep='\t',         # Explicitly set separator to TAB
                 encoding="utf-8",
                 low_memory=True,
                 on_bad_lines='skip',
@@ -347,13 +345,13 @@ def search_across_files(
             # Try other encodings if utf-8 fails
             for enc in ["utf-8-sig", "latin-1"]:
                 try:
-                    # <-- CHANGED: Set sep=None and engine='python'
+                    # <-- CHANGED: Set sep='\t' (TAB) and engine='python'
                     for chunk in pd.read_csv(
                         f,
                         dtype="string",
                         chunksize=chunk_size,
-                        engine='python',  # Must use python engine
-                        sep=None,         # Auto-detect separator
+                        engine='python',  # Python engine
+                        sep='\t',         # Explicitly set separator to TAB
                         encoding=enc,
                         low_memory=True,
                         on_bad_lines='skip',
@@ -381,7 +379,8 @@ def search_across_files(
         except Exception as e:
             # Catch other read errors (e.g., file empty, permissions)
             last_exception = e
-            failed.append(f"{os.path.basename(f)} — {e}")
+            if f"{os.path.basename(f)} — {e}" not in failed:
+                failed.append(f"{os.path.basename(f)} — {e}")
 
         if not read_ok:
              err_msg = f"{os.path.basename(f)} — could not read with Python engine. Last error: {last_exception}"
