@@ -458,16 +458,15 @@ if run:
             else:
                 st.success(f"Found {len(result)} matching row(s).")
                 
-                # <--- ***** CHANGED: Use CurrencyColumn with precision=0 ***** --->
+                # <--- ***** CHANGED: Use NumberColumn with simple $ format ***** --->
                 st.dataframe(
                     result, 
                     use_container_width=True, 
                     hide_index=True,
                     column_config={
-                        NB_AUM_CANON: st.column_config.CurrencyColumn(
+                        NB_AUM_CANON: st.column_config.NumberColumn(
                             label="NB AUM 6'25",
-                            currency="USD",   # Adds $ and commas
-                            precision=0       # Hides the .00 cents
+                            format="$%.0f"  # Format as $1234567
                         )
                     }
                 )
