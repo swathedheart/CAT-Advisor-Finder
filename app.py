@@ -13,11 +13,9 @@ st.title("🐱 CAT Advisor Finder")
 st.caption("Search your Rolodex CSVs by Entity ID or BR Team Name. Office City is an optional filter.")
 
 # --- Columns to output (in your requested order) ---
-# <--- ***** CHANGED: Added "Contact Name" ***** --->
 OUTPUT_COLUMNS = [
     "BR Team Name", "DST Firm Name", "Data Driven Segment", "SF Territory", "Office State", "Office City", "Office Address", "Contact Name", "SFDC Email", "DST Phone", "SFDC Phone", "Team Rank", "NB AUM 6'25", "2024 CRM Contacts", "2025 CRM Contacts", "Last Interaction Date", "Last BT Interaction Date", "SFDC Notes",
 ]
-# <--- ***** END OF CHANGE ***** --->
 
 # --- Required filter columns ---
 REQUIRED_FILTER_COLS = ["Entity ID", "BR Team Name", "Office City"]
@@ -156,15 +154,13 @@ def apply_header_normalization(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict[str
         # Check for duplicate targets one last time
         targets = list(rename_map.values())
         if len(targets) != len(set(targets)):
-            # This is complex, for now just skip rename if duplicates found
-            # A more robust way would be to only rename non-duplicates
             pass
         else:
             try:
                 df = df.rename(columns=rename_map)
             except Exception as e:
                 print(f"Error renaming columns: {e}") # Log for debugging
-                pass # Continue without renaming if it fails
+                pass 
     return df, rename_map
 
 # ---------------------------------------------
@@ -224,143 +220,35 @@ def fix_date_columns_inplace(df: pd.DataFrame, date_cols: List[str]) -> None:
             df.loc[remaining_mask[remaining_mask].index[ok], col] = dt_parsed[ok].dt.strftime("%Y-%m-%d")
 
 # ---------------------------------------------
-# Caching small things only
+# Caching 
 # ---------------------------------------------
 @st.cache_data(ttl=600, show_spinner=False, max_entries=3)
 def list_files(glob_pattern: str) -> List[str]:
     return glob.glob(glob_pattern)
 
-# ---------------------------------------------
-# Core filtering
-# ---------------------------------------------
-def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -> pd.DataFrame:
-    """Apply filters + date normalization + coalescing, then return results in the specified order."""
-    df = df.copy()
-
-    # Removed redundant normalization
-    # df, _ = apply_header_normalization(df) # This is already done in search_across_files
-
-    # Ensure required columns exist
-    for req in REQUIRED_FILTER_COLS:
-        if req not in df.columns:
-            df[req] = ""
-
-    # Coalesce *all* search columns to ensure they are clean strings
-    df = coalesce_column(
-        df,
-        target="Entity ID",
-        variants=["Entity ID"] # Just cleans the existing column
-    )
-    df = coalesce_column(
-        df, 
-        target="BR Team Name", 
-        variants=["BR Team Name", "Broker Team Name", "Team Name", "BR Team"]
-    )
-    df = coalesce_column(
-        df, 
-        target="Office City", 
-        variants=["Office City", "City"]
-    )
-
-
-    # --- City filter is now optional ---
-    df["_city"] = df["Office City"].astype(str).str.strip().str.lower()
-    city_norm = (city_text or "").strip().lower()
-
-    # Key match: Entity ID (exact) or Team Name (partial)
-    key_norm = (key_text or "").strip().lower()
-    if mode == "Entity ID":
-        # This now searches the clean, coalesced "Entity ID" column
-        df["_match"] = df["Entity ID"].astype(str).str.strip().str.lower() == key_norm
-    else:
-        # This now correctly uses the coalesced "BR Team Name" column
-        df["_team_norm"] = df["BR Team Name"].astype(str).apply(standardize_team_name)
-        df["_match"] = df["_team_norm"].str.contains(standardize_team_name(key_text), na=False)
-
-    # --- Create city_mask, which is True if city_norm is blank ---
-    if city_norm:
-        city_mask = (df["_city"] == city_norm)
-    else:
-        city_mask = True # Don't filter by city if it's empty
-
-    result = df.loc[df["_match"] & city_mask].copy()
-    # --- End of city logic change ---
-
-    # Coalesce tricky output columns
-    result = coalesce_column(
-        result,
-        target=TEAM_RANK_CANON,
-        variants=[
-            TEAM_RANK_CANON, " Team Rank ", "Team Rank", "Team Rank ", " Team Rank", "Rank (Team)"
-        ]
-    )
-    result = coalesce_column(
-        result,
-        target=NB_AUM_CANON,
-        variants=[
-            NB_AUM_CANON, "NB AUM 6’25", " NB AUM 6'25 ", "NB AUM 6'25 ", " NB AUM 6'25",
-            "NB AUM 6/25", "NB AUM Jun-25", "NB AUM June 2025"
-        ]
-    )
-    result = coalesce_column(
-        result,
-        target=LAST_INTER_CANON,
-        variants=[
-            LAST_INTER_CANON, "Last Interaction", "Last Interaction Dt", "Last Activity Date",
-            "Last Contact Date", "Last Touch", "Last Touch Date",
-            # 👇 typo variants
-            "Last Interation Date", "Last Interation",
-        ]
-    )
-    # Last BT Interaction Date is covered by aliases/normalization
-
-    # Convert dates after coalescing
-    fix_date_columns_inplace(result, DATE_COLUMNS)
-
-    # Ensure all output columns exist (fill missing with empty) and order columns
-    for col in OUTPUT_COLUMNS:
-        if col not in result.columns:
-            result[col] = ""
-
-    return result[OUTPUT_COLUMNS]
-
-# ---------------------------------------------
-# Streamed search across files (no usecols; normalize then filter)
-# ---------------------------------------------
-def search_across_files(
-    files: List[str],
-    mode: str,
-    key_text: str,
-    city_text: str,
-    chunk_size: int = 150_000,
-) -> Tuple[pd.DataFrame, list, Dict[str, int], Dict[str, int]]:
+# <--- ***** NEW CACHED FUNCTION TO LOAD ALL DATA ***** --->
+@st.cache_data(ttl=600, show_spinner="Loading and cleaning all Rolodex files for the first time...")
+def load_all_data(files: List[str]) -> Tuple[pd.DataFrame, list, Dict[str, int]]:
     """
-    Read each CSV in chunks using the Python engine (to auto-sniff separators),
-    normalize headers per chunk, filter in-chunk, and accumulate only the matches.
-
-    Returns:
-    - combined results DataFrame
-    - list of files that failed
-    - column_nonempty_counts: non-empty counts per canonical output column (profiling)
-    - alias_hit_counts: counts of how often each alias/rule mapped to a- canonical name
+    Load all files, normalize, coalesce, and combine into one big DataFrame.
+    This is cached to make subsequent searches fast.
     """
-    matches = []
+    all_chunks = []
     failed = []
-    column_nonempty_counts: Dict[str, int] = {c: 0 for c in OUTPUT_COLUMNS}
     alias_hit_counts: Dict[str, int] = {}
         
     for f in files:
         read_ok = False
         last_exception = None
         try:
-            # <-- Set sep='\t' (TAB), engine='python', and quoting=3
+            # Use the slow, robust parser
             for chunk in pd.read_csv(
                 f,
                 dtype="string",
-                chunksize=chunk_size,
-                engine='python',    # Python engine is more flexible
-                sep='\t',           # Explicitly set separator to TAB
-                quoting=csv.QUOTE_NONE, # Ignore all quote chars
+                chunksize=150_000, # Still read in chunks to avoid memory spikes
+                engine='python',
+                sep='\t',
+                quoting=csv.QUOTE_NONE,
                 encoding="utf-8",
                 low_memory=True,
                 on_bad_lines='skip',
@@ -371,29 +259,20 @@ def search_across_files(
                     key = f"{orig} -> {canon}"
                     alias_hit_counts[key] = alias_hit_counts.get(key, 0) + 1
                 
-                filtered = filter_results(renamed_chunk, mode, key_text, city_text)
-                
-                if not filtered.empty:
-                    for col in OUTPUT_COLUMNS:
-                        if col in filtered.columns:
-                            non_empty = filtered[col].notna().sum() - (filtered[col] == "").sum()
-                            column_nonempty_counts[col] += int(non_empty)
-                    matches.append(filtered)
-            read_ok = True # Success with utf-8
+                all_chunks.append(renamed_chunk)
+            read_ok = True 
 
         except UnicodeDecodeError as e:
             last_exception = e
-            # Try other encodings if utf-8 fails
             for enc in ["utf-8-sig", "latin-1"]:
                 try:
-                    # <-- Set sep='\t' (TAB), engine='python', and quoting=3
                     for chunk in pd.read_csv(
                         f,
                         dtype="string",
-                        chunksize=chunk_size,
-                        engine='python',    # Python engine
-                        sep='\t',           # Explicitly set separator to TAB
-                        quoting=csv.QUOTE_NONE, # Ignore all quote chars
+                        chunksize=150_000,
+                        engine='python',
+                        sep='\t',
+                        quoting=csv.QUOTE_NONE,
                         encoding=enc,
                         low_memory=True,
                         on_bad_lines='skip',
@@ -404,34 +283,103 @@ def search_across_files(
                             key = f"{orig} -> {canon}"
                             alias_hit_counts[key] = alias_hit_counts.get(key, 0) + 1
                         
-                        filtered = filter_results(renamed_chunk, mode, key_text, city_text)
-                        
-                        if not filtered.empty:
-                            for col in OUTPUT_COLUMNS:
-                                if col in filtered.columns:
-                                    non_empty = filtered[col].notna().sum() - (filtered[col] == "").sum()
-                                    column_nonempty_counts[col] += int(non_empty)
-                            matches.append(filtered)
+                        all_chunks.append(renamed_chunk)
                     read_ok = True
-                    break # Success with this encoding
+                    break 
                 except Exception as e:
                     last_exception = e
-                    continue # Try next encoding
+                    continue
 
         except Exception as e:
-            # Catch other read errors (e.g., file empty, permissions)
             last_exception = e
             if f"{os.path.basename(f)} — {e}" not in failed:
                 failed.append(f"{os.path.basename(f)} — {e}")
 
         if not read_ok and last_exception:
-             err_msg = f"{os.path.basename(f)} — could not read with Python engine. Last error: {last_exception}"
+             err_msg = f"{os.path.basename(f)} — could not read. Last error: {last_exception}"
              if err_msg not in failed:
                 failed.append(err_msg)
 
+    if not all_chunks:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS), failed, alias_hit_counts
 
-    out = pd.concat(matches, ignore_index=True) if matches else pd.DataFrame(columns=OUTPUT_COLUMNS)
-    return out, failed, column_nonempty_counts, alias_hit_counts
+    # Combine all chunks into one big DataFrame
+    df = pd.concat(all_chunks, ignore_index=True)
+
+    # --- Run pre-filtering cleanup ONCE on the giant DataFrame ---
+    
+    # Ensure required columns exist
+    for req in (REQUIRED_FILTER_COLS + OUTPUT_COLUMNS):
+        if req not in df.columns:
+            df[req] = ""
+
+    # Coalesce all search columns
+    df = coalesce_column(df, "Entity ID", ["Entity ID"])
+    df = coalesce_column(df, "BR Team Name", ["BR Team Name", "Broker Team Name", "Team Name", "BR Team"])
+    df = coalesce_column(df, "Office City", ["Office City", "City"])
+
+    # Coalesce tricky output columns
+    df = coalesce_column(df, TEAM_RANK_CANON, [TEAM_RANK_CANON, " Team Rank ", "Team Rank", "Team Rank ", " Team Rank", "Rank (Team)"])
+    df = coalesce_column(df, NB_AUM_CANON, [NB_AUM_CANON, "NB AUM 6’25", " NB AUM 6'25 ", "NB AUM 6'25 ", " NB AUM 6'25", "NB AUM 6/25", "NB AUM Jun-25", "NB AUM June 2025"])
+    df = coalesce_column(df, LAST_INTER_CANON, [LAST_INTER_CANON, "Last Interaction", "Last Interaction Dt", "Last Activity Date", "Last Contact Date", "Last Touch", "Last Touch Date", "Last Interation Date", "Last Interation"])
+    df = coalesce_column(df, "Contact Name", ["Contact Name"]) # Also clean Contact Name
+
+    # Convert dates
+    fix_date_columns_inplace(df, DATE_COLUMNS)
+
+    # Ensure all output columns exist one last time
+    for col in OUTPUT_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+
+    return df, failed, alias_hit_counts
+# <--- ***** END OF NEW FUNCTION ***** --->
+
+
+# ---------------------------------------------
+# Core filtering
+# ---------------------------------------------
+# <--- ***** SIMPLIFIED: This function now *only* filters the big DataFrame ***** --->
+def filter_results(
+    df: pd.DataFrame, 
+    mode: str, 
+    key_text: str, 
+    city_text: str
+) -> Tuple[pd.DataFrame, Dict[str, int]]:
+    """Apply filters to the *already cleaned* master DataFrame."""
+    
+    df_filtered = df.copy()
+    column_nonempty_counts: Dict[str, int] = {c: 0 for c in OUTPUT_COLUMNS}
+
+    # --- City filter ---
+    city_norm = (city_text or "").strip().lower()
+    if city_norm:
+        city_mask = (df_filtered["Office City"].astype(str).str.strip().str.lower() == city_norm)
+    else:
+        city_mask = True # Don't filter by city if it's empty
+
+    # --- Key match ---
+    key_norm = (key_text or "").strip().lower()
+    if mode == "Entity ID":
+        match_mask = df_filtered["Entity ID"].astype(str).str.strip().str.lower() == key_norm
+    else:
+        # Standardize team name on the fly for matching
+        team_norm = df_filtered["BR Team Name"].astype(str).apply(standardize_team_name)
+        match_mask = team_norm.str.contains(standardize_team_name(key_text), na=False)
+
+    result = df_filtered.loc[match_mask & city_mask].copy()
+    
+    # --- Profiling ---
+    if not result.empty:
+        for col in OUTPUT_COLUMNS:
+            if col in result.columns:
+                non_empty = result[col].notna().sum() - (result[col] == "").sum()
+                column_nonempty_counts[col] += int(non_empty)
+
+    # Return only the specified output columns
+    return result[OUTPUT_COLUMNS], column_nonempty_counts
+# <--- ***** END OF SIMPLIFIED FUNCTION ***** --->
+
 
 # ---------------------------------------------
 # Sidebar UI
@@ -463,6 +411,7 @@ with st.sidebar:
 # ---------------------------------------------
 # Main flow
 # ---------------------------------------------
+# <--- ***** CHANGED: THIS IS THE NEW CACHING LOGIC ***** --->
 files = list_files(glob_pattern)
 st.write(f"Found files: {len(files)}")
 
@@ -472,43 +421,52 @@ if not files:
 st.divider()
 
 if run:
-    # <-- Only require key_input, city_input is optional
     if not key_input:
         st.warning("Enter an **Entity ID/Team Name** to search.")
     elif not files:
         st.warning("No data files found. Check your folder pattern.")
     else:
-        with st.spinner("Searching across files…"):
-            # Changed `city_text` to `city_input` to match the variable from st.text_input
-            result, failed, col_counts, alias_hits = search_across_files(
-                files, mode, key_input, city_input, chunk_size=150_000
-            )
-
+        # 1. This will be SLOW the FIRST time, and fast every time after.
+        # It runs the slow parser and all the cleaning/coalescing.
+        master_df, failed, alias_hits = load_all_data(files)
+        
         if failed:
             with st.expander("Files that failed to read or had bad lines", expanded=False):
                 st.write("\n".join(failed))
                 st.caption("Note: `on_bad_lines='skip'` was used. Some rows in these (or other) files may have been skipped if they were malformed.")
 
-        # Profilers
-        with st.expander("Column profile (non-empty counts in results)", expanded=False):
-            st.json(col_counts)
+        if master_df.empty and not failed:
+             st.warning("Loaded files, but no data was found.")
         
-        if alias_hits:
-            with st.expander("Header mappings observed", expanded=False):
-                st.json(alias_hits)
-        
-        if result.empty:
-            st.info("No matching rows found. Try adjusting the name/ID or city.")
-        else:
-    
-            st.success(f"Found {len(result)} matching row(s).")
-            st.dataframe(result, use_container_width=True, hide_index=True)
+        # Only proceed if we have a master DataFrame
+        if not master_df.empty:
+            # 2. This is the FAST part. It just filters the in-memory DataFrame.
+            with st.spinner("Searching..."):
+                result, col_counts = filter_results(
+                    master_df, mode, key_input, city_input
+                )
+
+            # Profilers
+            with st.expander("Column profile (non-empty counts in results)", expanded=False):
+                st.json(col_counts)
             
-            csv_bytes = result.to_csv(index=False).encode("utf-8")
-            fname = f"advisor_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            st.download_button(
-                "Download CSV",
-                csv_bytes,
-                file_name=fname,
-                mime="text/csv"
-            )
+            if alias_hits:
+                with st.expander("Header mappings observed (from initial load)", expanded=False):
+                    st.json(alias_hits)
+            
+            # 3. Display results
+            if result.empty:
+                st.info("No matching rows found. Try adjusting the name/ID or city.")
+            else:
+                st.success(f"Found {len(result)} matching row(s).")
+                st.dataframe(result, use_container_width=True, hide_index=True)
+                
+                csv_bytes = result.to_csv(index=False).encode("utf-8")
+                fname = f"advisor_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                st.download_button(
+                    "Download CSV",
+                    csv_bytes,
+                    file_name=fname,
+                    mime="text/csv"
+                )
+# <--- ***** END OF NEW LOGIC ***** --->
