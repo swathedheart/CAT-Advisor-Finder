@@ -51,11 +51,9 @@ HEADER_ALIASES: Dict[str, str] = {
     # Required
     "entity id": "Entity ID",
     "br team name": "BR Team Name",
-    "team name": "BR Team Name",
-    "broker team name": "BR Team Name",
-    "br team": "BR Team Name",
+    # <-- CHANGED: Removed "team name", "broker team name", "br team"
     "office city": "Office City",
-    "city": "Office City",
+    # <-- CHANGED: Removed "city"
 
     # Common outputs
     "sf territory": "SF Territory",
@@ -232,6 +230,21 @@ def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -
         if req not in df.columns:
             df[req] = ""
 
+    # <--- ***** CHANGED: ADDED COALESCING *BEFORE* FILTERING ***** --->
+    # This merges columns like 'Broker Team Name' into 'BR Team Name'
+    df = coalesce_column(
+        df, 
+        target="BR Team Name", 
+        variants=["BR Team Name", "Broker Team Name", "Team Name", "BR Team"]
+    )
+    df = coalesce_column(
+        df, 
+        target="Office City", 
+        variants=["Office City", "City"]
+    )
+    # <--- ***** END OF CHANGE ***** --->
+
+
     # --- City filter is now optional ---
     df["_city"] = df["Office City"].astype(str).str.strip().str.lower()
     city_norm = (city_text or "").strip().lower()
@@ -241,6 +254,7 @@ def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -
     if mode == "Entity ID":
         df["_match"] = df["Entity ID"].astype(str).str.strip().str.lower() == key_norm
     else:
+        # This now correctly uses the coalesced "BR Team Name" column
         df["_team_norm"] = df["BR Team Name"].astype(str).apply(standardize_team_name)
         df["_match"] = df["_team_norm"].str.contains(standardize_team_name(key_text), na=False)
 
@@ -253,7 +267,7 @@ def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -
     result = df.loc[df["_match"] & city_mask].copy()
     # --- End of city logic change ---
 
-    # Coalesce tricky columns (just in case variants slipped through)
+    # Coalesce tricky output columns
     result = coalesce_column(
         result,
         target=TEAM_RANK_CANON,
@@ -446,12 +460,10 @@ if run:
         st.warning("No data files found. Check your folder pattern.")
     else:
         with st.spinner("Searching across files…"):
-            # <--- ***** THIS IS THE FIX ***** --->
             # Changed `city_text` to `city_input` to match the variable from st.text_input
             result, failed, col_counts, alias_hits = search_across_files(
                 files, mode, key_input, city_input, chunk_size=150_000
             )
-            # <--- ***** END OF FIX ***** --->
 
         if failed:
             with st.expander("Files that failed to read or had bad lines", expanded=False):
