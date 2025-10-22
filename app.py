@@ -13,9 +13,11 @@ st.title("🐱 CAT Advisor Finder")
 st.caption("Search your Rolodex CSVs by Entity ID or BR Team Name. Office City is an optional filter.")
 
 # --- Columns to output (in your requested order) ---
+# <--- ***** CHANGED: Added "Contact Name" ***** --->
 OUTPUT_COLUMNS = [
-    "BR Team Name", "DST Firm Name", "Data Driven Segment", "SF Territory", "Office State", "Office City", "Office Address", "SFDC Email", "DST Phone", "SFDC Phone", "Team Rank", "NB AUM 6'25", "2024 CRM Contacts", "2025 CRM Contacts", "Last Interaction Date", "Last BT Interaction Date", "SFDC Notes",
+    "BR Team Name", "DST Firm Name", "Data Driven Segment", "SF Territory", "Office State", "Office City", "Office Address", "Contact Name", "SFDC Email", "DST Phone", "SFDC Phone", "Team Rank", "NB AUM 6'25", "2024 CRM Contacts", "2025 CRM Contacts", "Last Interaction Date", "Last BT Interaction Date", "SFDC Notes",
 ]
+# <--- ***** END OF CHANGE ***** --->
 
 # --- Required filter columns ---
 REQUIRED_FILTER_COLS = ["Entity ID", "BR Team Name", "Office City"]
@@ -235,7 +237,7 @@ def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -
     """Apply filters + date normalization + coalescing, then return results in the specified order."""
     df = df.copy()
 
-    # <-- ***** CHANGED: REMOVED REDUNDANT NORMALIZATION ***** --->
+    # Removed redundant normalization
     # df, _ = apply_header_normalization(df) # This is already done in search_across_files
 
     # Ensure required columns exist
@@ -243,8 +245,7 @@ def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -
         if req not in df.columns:
             df[req] = ""
 
-    # <--- ***** CHANGED: ADDED COALESCING FOR *ALL* SEARCH COLUMNS ***** --->
-    # This ensures Entity ID is also a clean string column, just like BR Team Name
+    # Coalesce *all* search columns to ensure they are clean strings
     df = coalesce_column(
         df,
         target="Entity ID",
@@ -260,7 +261,6 @@ def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -
         target="Office City", 
         variants=["Office City", "City"]
     )
-    # <--- ***** END OF CHANGE ***** --->
 
 
     # --- City filter is now optional ---
