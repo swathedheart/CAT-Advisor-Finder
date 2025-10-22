@@ -158,16 +158,14 @@ def apply_header_normalization(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict[str
 # Other helpers
 # ---------------------------------------------
 
-# <--- ***** THIS IS THE FIX ***** --->
 def standardize_team_name(s: str) -> str:
     """Lowercase, replace punctuation with space, collapse spaces—for partial team-name matching."""
     if not isinstance(s, str):
         return ""
     s = s.lower()
-    # CHANGED: Replaced punctuation with a space, instead of just removing it.
+    # Replaced punctuation with a space, instead of just removing it.
     s = re.sub(r"[^\w\s]", " ", s) 
     return " ".join(s.split())
-# <--- ***** END OF FIX ***** --->
 
 def coalesce_column(df: pd.DataFrame, target: str, variants: list) -> pd.DataFrame:
     """Create/overwrite df[target] by pulling from the first non-empty among variant columns."""
@@ -388,7 +386,7 @@ def search_across_files(
                     continue # Try next encoding
 
         except Exception as e:
-            # Catch other read errors (e.Read each CSV in chunks using the Python engine (to auto-sniff separators),
+            # Catch other read errors (e.g., file empty, permissions)
             last_exception = e
             if f"{os.path.basename(f)} — {e}" not in failed:
                 failed.append(f"{os.path.basename(f)} — {e}")
@@ -448,9 +446,12 @@ if run:
         st.warning("No data files found. Check your folder pattern.")
     else:
         with st.spinner("Searching across files…"):
+            # <--- ***** THIS IS THE FIX ***** --->
+            # Changed `city_text` to `city_input` to match the variable from st.text_input
             result, failed, col_counts, alias_hits = search_across_files(
-                files, mode, key_input, city_text, chunk_size=150_000
+                files, mode, key_input, city_input, chunk_size=150_000
             )
+            # <--- ***** END OF FIX ***** --->
 
         if failed:
             with st.expander("Files that failed to read or had bad lines", expanded=False):
