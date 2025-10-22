@@ -51,9 +51,7 @@ HEADER_ALIASES: Dict[str, str] = {
     # Required
     "entity id": "Entity ID",
     "br team name": "BR Team Name",
-    # <-- CHANGED: Removed "team name", "broker team name", "br team"
     "office city": "Office City",
-    # <-- CHANGED: Removed "city"
 
     # Common outputs
     "sf territory": "SF Territory",
@@ -132,24 +130,39 @@ def apply_header_normalization(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict[str
 
         # 1) direct alias
         if norm in HEADER_ALIASES:
-            rename_map[c] = HEADER_ALIASES[norm]
+            # Check for duplicate target *before* adding
+            if HEADER_ALIASES[norm] not in rename_map.values():
+                 rename_map[c] = HEADER_ALIASES[norm]
             continue
 
         # 2) exact canonical (ignores case/space)
         if norm in canonical_norms:
-            rename_map[c] = canonical_norms[norm]
+            if canonical_norms[norm] not in rename_map.values():
+                rename_map[c] = canonical_norms[norm]
             continue
         
         # 3) rule-based
         via_rule = rule_based_alias(norm)
         if via_rule:
-            rename_map[c] = via_rule
+            if via_rule not in rename_map.values():
+                rename_map[c] = via_rule
             continue
         
         # else: leave as-is
 
     if rename_map:
-        df = df.rename(columns=rename_map)
+        # Check for duplicate targets one last time
+        targets = list(rename_map.values())
+        if len(targets) != len(set(targets)):
+            # This is complex, for now just skip rename if duplicates found
+            # A more robust way would be to only rename non-duplicates
+            pass
+        else:
+            try:
+                df = df.rename(columns=rename_map)
+            except Exception as e:
+                print(f"Error renaming columns: {e}") # Log for debugging
+                pass # Continue without renaming if it fails
     return df, rename_map
 
 # ---------------------------------------------
@@ -222,16 +235,21 @@ def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -
     """Apply filters + date normalization + coalescing, then return results in the specified order."""
     df = df.copy()
 
-    # Normalize headers first
-    df, _ = apply_header_normalization(df)
+    # <-- ***** CHANGED: REMOVED REDUNDANT NORMALIZATION ***** --->
+    # df, _ = apply_header_normalization(df) # This is already done in search_across_files
 
     # Ensure required columns exist
     for req in REQUIRED_FILTER_COLS:
         if req not in df.columns:
             df[req] = ""
 
-    # <--- ***** CHANGED: ADDED COALESCING *BEFORE* FILTERING ***** --->
-    # This merges columns like 'Broker Team Name' into 'BR Team Name'
+    # <--- ***** CHANGED: ADDED COALESCING FOR *ALL* SEARCH COLUMNS ***** --->
+    # This ensures Entity ID is also a clean string column, just like BR Team Name
+    df = coalesce_column(
+        df,
+        target="Entity ID",
+        variants=["Entity ID"] # Just cleans the existing column
+    )
     df = coalesce_column(
         df, 
         target="BR Team Name", 
@@ -252,6 +270,7 @@ def filter_results(df: pd.DataFrame, mode: str, key_text: str, city_text: str) -
     # Key match: Entity ID (exact) or Team Name (partial)
     key_norm = (key_text or "").strip().lower()
     if mode == "Entity ID":
+        # This now searches the clean, coalesced "Entity ID" column
         df["_match"] = df["Entity ID"].astype(str).str.strip().str.lower() == key_norm
     else:
         # This now correctly uses the coalesced "BR Team Name" column
@@ -405,7 +424,7 @@ def search_across_files(
             if f"{os.path.basename(f)} — {e}" not in failed:
                 failed.append(f"{os.path.basename(f)} — {e}")
 
-        if not read_ok:
+        if not read_ok and last_exception:
              err_msg = f"{os.path.basename(f)} — could not read with Python engine. Last error: {last_exception}"
              if err_msg not in failed:
                 failed.append(err_msg)
